@@ -1,7 +1,8 @@
 """Draws the PingLive pixel-art icon and writes assets/pinglive.ico (+ a PNG preview).
 
-A green "ping" - a dot sending out signal arcs - on a dark rounded tile, with
-"Ping Live" in a pixel font underneath. The big sizes are a 64x64 pixel grid
+A green "ping" - a glowing dot sending out bevelled signal arcs - on a dark
+rounded tile with a soft top-to-bottom gradient, with "Ping Live" in a pixel
+font (with a drop shadow) underneath. The big sizes are a 64x64 pixel grid
 scaled up by whole numbers; 48, 32 and 16 get their own grids without the text,
 which would be unreadable that small.
 
@@ -14,12 +15,19 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 
-TILE = (11, 31, 20, 255)
+TILE_TOP = (18, 46, 30, 255)
+TILE_BOTTOM = (7, 22, 14, 255)
+TILE = TILE_BOTTOM  # kept for callers; the tile itself is a gradient
 BORDER = (22, 101, 52, 255)
+SHEEN = (34, 130, 70, 255)  # 1px highlight just inside the top edge
 OUTLINE = (5, 46, 22, 255)
 DOT = (187, 247, 208, 255)
+DOT_HI = (240, 253, 244, 255)
+GLOW = (28, 112, 60, 255)
 ARCS = [(134, 239, 172, 255), (74, 222, 128, 255), (34, 197, 94, 255)]
+ARCS_HI = [(187, 247, 208, 255), (134, 239, 172, 255), (74, 222, 128, 255)]
 TEXT = (220, 252, 231, 255)
+TEXT_SHADOW = (3, 20, 10, 255)
 
 # 9-row glyphs (row 6 is the baseline, 7-8 the descender of "g").
 GLYPHS = {
@@ -43,13 +51,21 @@ def tile(n, radius, border):
             dy = max(radius - y - 0.5, y + 0.5 - (n - radius), 0)
             d = (dx * dx + dy * dy) ** 0.5
             if d <= radius:
-                px[x, y] = BORDER if border and d > radius - 1.2 else TILE
+                t = y / (n - 1)
+                fill = tuple(round(a + (b - a) * t) for a, b in zip(TILE_TOP, TILE_BOTTOM))
+                px[x, y] = BORDER if border and d > radius - 1.2 else fill
     # plain square edges get the border too
     if border:
         for i in range(radius, n - radius):
             for (x, y) in ((i, 0), (i, n - 1), (0, i), (n - 1, i)):
                 px[x, y] = BORDER
+        for x in range(radius, n - radius):
+            px[x, 1] = SHEEN
     return img
+
+
+def is_tile(c):
+    return c[3] == 255 and c not in (BORDER, SHEEN) and c[1] < 60
 
 
 def signal(img, cx, cy, dot_r, rings, outline):
@@ -61,18 +77,22 @@ def signal(img, cx, cy, dot_r, rings, outline):
             dx, dy = x + 0.5 - cx, y + 0.5 - cy
             d = (dx * dx + dy * dy) ** 0.5
             if d <= dot_r:
-                px[x, y] = DOT
+                hi = dot_r >= 2 and dx < 0 and dy < 0 and d > dot_r * 0.25 and d < dot_r * 0.75
+                px[x, y] = DOT_HI if hi else DOT
                 drawn.add((x, y))
                 continue
+            if outline and d <= dot_r + 1.3:
+                px[x, y] = GLOW
             if dy < 0 and abs(dx) <= -dy * 1.05:  # 90-degree wedge, pointing up
-                for (r0, r1), color in zip(rings, ARCS):
+                for (r0, r1), color, hi in zip(rings, ARCS, ARCS_HI):
                     if r0 <= d <= r1:
-                        px[x, y] = color
+                        # the outer edge catches the light: a bevel on the big sizes
+                        px[x, y] = hi if outline and d > r1 - 1 else color
                         drawn.add((x, y))
     if outline:
         for (x, y) in list(drawn):
             for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                if (nx, ny) not in drawn and 0 <= nx < n and 0 <= ny < n and px[nx, ny] == TILE:
+                if (nx, ny) not in drawn and 0 <= nx < n and 0 <= ny < n and is_tile(px[nx, ny]):
                     px[nx, ny] = OUTLINE
 
 
@@ -87,6 +107,9 @@ def text(img, s, y0):
                 for col, c in enumerate(line):
                     if c == "#":
                         px[x + col, y0 + row] = TEXT
+                        below = GLYPHS[ch][row + 1][col] if row + 1 < len(GLYPHS[ch]) else "."
+                        if below != "#":
+                            px[x + col, y0 + row + 1] = TEXT_SHADOW
         x += w + 1
 
 

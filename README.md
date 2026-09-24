@@ -102,6 +102,8 @@ and the version info (product, publisher from `authors` in `Cargo.toml`,
 version, copyright) are embedded into the exe by `build.rs`, so they show in
 Explorer, the file's Properties > Details and Installed apps. After changing
 the icon script, run `python scripts/make-icon.py` and rebuild.
+`scripts/make-social-preview.py` draws the GitHub social preview card
+(`assets/social-preview.png`) from the same icon.
 
 ## Run
 
