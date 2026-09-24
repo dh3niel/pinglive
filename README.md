@@ -5,34 +5,33 @@
 <h1 align="center">PingLive</h1>
 
 <p align="center">
-  A tiny always-on-top ping overlay for Windows games: live latency, a rolling graph,<br>
-  a timeout counter and a beep the moment your connection drops.
+  A tiny always-on-top ping monitor for Windows: live latency, a rolling graph,<br>
+  a timeout counter, and an alert sound on every timeout or ping spike.
 </p>
 
 <p align="center">
-  <a href="https://github.com/dh3niel/PingLive/actions/workflows/build.yml"><img src="https://github.com/dh3niel/PingLive/actions/workflows/build.yml/badge.svg" alt="Build"></a>
-  <a href="https://github.com/dh3niel/PingLive/releases/latest"><img src="https://img.shields.io/github/v/release/dh3niel/PingLive" alt="Latest release"></a>
+  <a href="https://github.com/dh3niel/pinglive/actions/workflows/build.yml"><img src="https://github.com/dh3niel/pinglive/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/dh3niel/pinglive/releases/latest"><img src="https://img.shields.io/github/v/release/dh3niel/pinglive" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue" alt="Windows 10 | 11">
 </p>
 
-```
- 8.8.8.8                    23 ms
- avg 24  jit 2  21/48   TO 3  loss 1%
- ▁▂▁▂▃▂▁▁█▁▂▂▁▃▂▁▁▂▁▂▁▂▃▂▂▁▁▂▁▂▁▁▂▁▂
-                        ↑ red bar = timeout
-```
+<p align="center">
+  <img src="docs/screenshots/overlay.png" alt="PingLive overlay">
+</p>
 
-Built for Dota 2, but it works over any game or app in windowed or borderless
-mode. It sits in a corner like the Discord overlay, lets clicks pass straight
-through to the game, and keeps a full history so you can see *when* your
-connection usually goes bad. Written in Rust, a single ~4 MB exe, negligible
-CPU/GPU cost.
+For anyone who needs to keep an eye on their connection: gamers chasing lag
+spikes, people on video calls or streams, or anyone trying to prove to their
+ISP *when* the line drops. PingLive sits in a corner of the screen, always on
+top and click-through, so you can keep working or playing. It beeps the
+moment a request times out or the ping spikes, and it keeps a full history so
+you can see when your connection usually goes bad. Written in Rust, it's a
+single ~4 MB exe with negligible CPU/GPU cost.
 
 ## Quick start
 
 1. Download `pinglive-vX.Y.Z-windows-x64.zip` from the
-   [latest release](https://github.com/dh3niel/PingLive/releases/latest) and unzip it.
+   [latest release](https://github.com/dh3niel/pinglive/releases/latest) and unzip it.
 2. Run `pinglive.exe` to try it; the overlay appears in the top-left corner.
    Press `Ctrl+Alt+P` to drag it, `Ctrl+Alt+D` for the dashboard.
 3. To keep it running, install it as a Windows service (asks for admin once):
@@ -45,6 +44,12 @@ CPU/GPU cost.
    up in **Settings → Apps → Installed apps**, where you can uninstall it.
    See [Install as a Windows service](#install-as-a-windows-service).
 
+## Screenshots
+
+| Dashboard: history and heatmaps | Settings |
+| --- | --- |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Settings](docs/screenshots/settings.png) |
+
 ## What it does
 
 - **Live ping** to any host or IP (default `8.8.8.8`) using Windows ICMP —
@@ -54,11 +59,17 @@ CPU/GPU cost.
   so a packet-loss burst is visible at a glance.
 - **Stats**: current, average, min/max, jitter, loss %, and a running
   **timeout counter** since start.
-- **Audio alert** on a **request timeout** and whenever a ping **reaches 300 ms**
-  — nothing else makes a sound. A custom `.wav` if you point at one, otherwise
-  a generated descending double beep, rate-limited by `cooldown_secs`.
+- **Sound alerts**, each with its own sound so you can tell them apart
+  without looking:
+  - **Request timeout (RTO):** a descending two-tone alarm.
+  - **Ping spike** (≥ 300 ms by default): a quick rising double blip.
+  - **Recovery** (optional): a short chime when replies come back.
+
+  The sounds are generated in memory and play through your normal audio
+  device, at a volume you set. You can also use your own `.wav` for timeouts
+  and spikes. Alerts are rate-limited by `cooldown_secs`.
 - **Click-through by default** — the mouse goes straight to the game.
-- **Global hotkeys** work while Dota has focus.
+- **Global hotkeys** work even while a game or another app has focus.
 - **Full ping history on disk** — every sample, kept for `retention_days`.
 - **Dashboard** — this hour / today / last 24 h, a per-minute heatmap of the
   last 24 hours, a day × hour heatmap for 7 or 30 days, a time-of-day profile
@@ -120,7 +131,7 @@ CLI flags override the config for that run and are saved back:
 ## Config — `%APPDATA%\PingLive\config.toml`
 
 ```toml
-target = "8.8.8.8"      # host or IP; use your Dota server IP for real match ping
+target = "8.8.8.8"      # host or IP: your router, DNS, a game server...
 label = ""              # short name to display instead of the target
 interval_ms = 1000      # how often to ping
 timeout_ms = 1000       # no reply within this = timeout
@@ -145,8 +156,10 @@ cooldown_secs = 3       # minimum gap between alerts
 recovery_sound = false    # no chime on recovery; beep only for the two cases below
 high_ping_ms = 300      # beep as soon as a ping reaches this...
 high_ping_streak = 1    # ...on the very first sample that does
-sound_file = ""         # absolute path to a .wav, or empty for built-in beeps
-beep_freq_hz = 880
+volume = 0.8            # built-in sounds, 0.0 .. 1.0
+sound_file = ""         # .wav for timeouts, or empty for the built-in alarm
+spike_sound_file = ""   # .wav for ping spikes, or empty for the built-in blip
+beep_freq_hz = 880      # built-in timeout alarm: first tone, length, count
 beep_ms = 120
 beep_count = 2
 
@@ -157,30 +170,36 @@ warn_ms = 120           # <= yellow, above = red
 
 Restart the overlay after editing `target`, `interval_ms` or `timeout_ms`.
 
-### A custom alert sound
+### Custom alert sounds
 
 ```toml
 [alert]
-sound_file = "C:\\Users\\Administrator\\Sounds\\ping-drop.wav"
+sound_file = "C:\\Sounds\\connection-lost.wav"
+spike_sound_file = "C:\\Sounds\\lag.wav"
 ```
 
-Must be a `.wav` (Windows `PlaySound`), and it plays asynchronously so it
-never stalls the overlay. Leave it empty to use the built-in beeps, which
-need no audio file and go through the motherboard/system beep path.
+Each must be a `.wav` file, and it plays on a background thread so it never
+stalls the overlay. Leave them empty for the built-in sounds, which need no
+audio file. **Settings → Alert sound** has *Test timeout*, *Test spike* and
+*Test recovery* buttons to hear them.
 
-## Pinging the actual Dota 2 server
+## What to ping
 
-`8.8.8.8` tells you whether *your line* is healthy, which is what you usually
-want when you are looking for the cause of a lag spike. To watch the real game
-server instead, find its IP while in a match:
+- **`8.8.8.8`** (the default) or **`1.1.1.1`** tells you whether *your
+  internet line* is healthy, which is usually what you want when looking for
+  the cause of lag.
+- **Your router** (e.g. `192.168.1.1`) separates Wi-Fi/LAN trouble from ISP
+  trouble: if the router times out too, the problem is inside your home.
+- **A game server** shows the route to that server. For Dota 2 there is a
+  helper that lists the servers the game is talking to while you're in a match:
 
-```bash
-powershell -ExecutionPolicy Bypass -File scripts\dota-server-ip.ps1
-```
+  ```bash
+  powershell -ExecutionPolicy Bypass -File scripts\dota-server-ip.ps1
+  ```
 
-then set that IP as `target`. Note that Valve's relays de-prioritise or drop
-ICMP, so the number can read higher than Dota's own in-game ping — treat the
-*shape* of the graph as the signal, not the absolute value.
+  Many game relays deprioritise or drop ICMP, so the number can read higher
+  than the in-game ping. Treat the *shape* of the graph as the signal, not
+  the absolute value.
 
 ## Ping history
 
@@ -245,10 +264,11 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall-autostart.ps1
 The app takes a named mutex, so a second copy started by hand exits
 immediately instead of stacking a second overlay on screen.
 
-## Dota 2 display mode
+## Fullscreen games
 
-Overlays can only be drawn over a game that is **Windowed** or **Borderless
-Window** (Dota 2: Settings → Video → Display Mode). In exclusive **Fullscreen**,
+Overlays can only be drawn over a game running in **Windowed** or **Borderless
+Window** mode (usually under the game's video or display settings). In
+exclusive **Fullscreen**,
 Windows gives the game the whole swap chain and no top-most window shows
 through — this is the same limitation the Discord and Steam overlays have.
 

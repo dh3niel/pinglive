@@ -95,13 +95,13 @@ impl PingLive {
                     if self.was_down {
                         self.was_down = false;
                         if self.cfg.alert.enabled && self.cfg.alert.recovery_sound && !self.muted {
-                            self.sound.recovered();
+                            self.sound.recovered(&self.cfg.alert);
                         }
                     }
                     if ms >= self.cfg.alert.high_ping_ms {
                         self.high_streak += 1;
                         if self.high_streak >= self.cfg.alert.high_ping_streak {
-                            self.fire_alert();
+                            self.fire_alert(false);
                         }
                     } else {
                         self.high_streak = 0;
@@ -113,14 +113,15 @@ impl PingLive {
                     self.high_streak = 0;
                     if self.streak >= self.cfg.alert.timeout_streak {
                         self.was_down = true;
-                        self.fire_alert();
+                        self.fire_alert(true);
                     }
                 }
             }
         }
     }
 
-    fn fire_alert(&mut self) {
+    /// `timeout`: the request timed out; otherwise a ping spike.
+    fn fire_alert(&mut self, timeout: bool) {
         if !self.cfg.alert.enabled || self.muted {
             return;
         }
@@ -129,7 +130,11 @@ impl PingLive {
             return;
         }
         self.last_alert = Some(Instant::now());
-        self.sound.alarm(&self.cfg.alert);
+        if timeout {
+            self.sound.alarm(&self.cfg.alert);
+        } else {
+            self.sound.spike(&self.cfg.alert);
+        }
     }
 
     fn stats(&self) -> Stats {

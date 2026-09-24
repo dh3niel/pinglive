@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Hostname or IP to ping, e.g. "8.8.8.8" or a Dota 2 server IP.
+    /// Hostname or IP to ping, e.g. "8.8.8.8", your router, or a game server.
     pub target: String,
     /// Optional short label drawn in the overlay instead of `target`.
     pub label: String,
@@ -54,8 +54,12 @@ pub struct AlertCfg {
     /// Also alert when ping stays above `high_ping_ms` for `high_ping_streak` samples.
     pub high_ping_ms: u32,
     pub high_ping_streak: u32,
-    /// Absolute path to a .wav played on timeout. Empty = built-in generated beeps.
+    /// Absolute path to a .wav played on timeout. Empty = built-in alarm.
     pub sound_file: String,
+    /// Absolute path to a .wav played on a ping spike. Empty = built-in blip.
+    pub spike_sound_file: String,
+    /// Loudness of the built-in sounds, 0.0 .. 1.0.
+    pub volume: f32,
     /// Built-in beep shape (used when `sound_file` is empty).
     pub beep_freq_hz: u32,
     pub beep_ms: u32,
@@ -113,6 +117,8 @@ impl Default for AlertCfg {
             high_ping_ms: 300,
             high_ping_streak: 1,
             sound_file: String::new(),
+            spike_sound_file: String::new(),
+            volume: 0.8,
             beep_freq_hz: 880,
             beep_ms: 120,
             beep_count: 2,

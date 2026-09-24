@@ -26,6 +26,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --release --locked
 
+      - name: Test
+        run: cargo test --release --locked
+
       - name: Build
         run: cargo build --release --locked
 

@@ -320,10 +320,16 @@ impl Dashboard {
             ui.label("Chime on recovery");
             ui.checkbox(&mut draft.alert.recovery_sound, "");
             ui.end_row();
-            ui.label("Custom .wav (empty = beeps)");
+            ui.label("Volume");
+            ui.add(egui::Slider::new(&mut draft.alert.volume, 0.0..=1.0).show_value(false));
+            ui.end_row();
+            ui.label("Timeout .wav (empty = built-in)");
             ui.add(egui::TextEdit::singleline(&mut draft.alert.sound_file).desired_width(320.0));
             ui.end_row();
-            ui.label("Beep tone (Hz / ms / count)");
+            ui.label("Spike .wav (empty = built-in)");
+            ui.add(egui::TextEdit::singleline(&mut draft.alert.spike_sound_file).desired_width(320.0));
+            ui.end_row();
+            ui.label("Timeout tone (Hz / ms / count)");
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(&mut draft.alert.beep_freq_hz).range(37..=20_000));
                 ui.add(egui::DragValue::new(&mut draft.alert.beep_ms).range(20..=2000));
@@ -331,9 +337,17 @@ impl Dashboard {
             });
             ui.end_row();
             ui.label("");
-            if ui.button("Test sound").clicked() {
-                sound.alarm(&draft.alert);
-            }
+            ui.horizontal(|ui| {
+                if ui.button("Test timeout").clicked() {
+                    sound.alarm(&draft.alert);
+                }
+                if ui.button("Test spike").clicked() {
+                    sound.spike(&draft.alert);
+                }
+                if ui.button("Test recovery").clicked() {
+                    sound.recovered(&draft.alert);
+                }
+            });
             ui.end_row();
         });
 
