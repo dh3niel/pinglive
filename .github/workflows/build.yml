@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Check embedded version info
+        shell: pwsh
+        run: |
+          $v = (Get-Item target/release/pinglive.exe).VersionInfo
+          "Product: $($v.ProductName) $($v.ProductVersion)  Publisher: $($v.CompanyName)"
+          if (-not $v.CompanyName) { throw "version resource missing from pinglive.exe" }
+
+      - name: Stage files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/pinglive.exe, LICENSE, README.md dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinglive-windows-x64
+          path: dist/
+
+  release:
+    name: GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pinglive-windows-x64
+
+      - name: Zip
+        run: zip pinglive-${{ github.ref_name }}-windows-x64.zip pinglive.exe LICENSE README.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: pinglive-${{ github.ref_name }}-windows-x64.zip
+          generate_release_notes: true
