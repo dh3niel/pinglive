@@ -320,8 +320,15 @@ impl Dashboard {
             ui.label("Chime on recovery");
             ui.checkbox(&mut draft.alert.recovery_sound, "");
             ui.end_row();
-            ui.label("Volume");
-            ui.add(egui::Slider::new(&mut draft.alert.volume, 0.0..=1.0).show_value(false));
+            ui.label("Volume (built-in sounds)");
+            let volume = ui.add(
+                egui::Slider::new(&mut draft.alert.volume, 0.0..=1.0)
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .custom_parser(|s| s.trim().trim_end_matches('%').trim().parse::<f64>().ok().map(|v| v / 100.0)),
+            );
+            if volume.drag_stopped() {
+                sound.spike(&draft.alert); // hear the new level straight away
+            }
             ui.end_row();
             ui.label("Timeout .wav (empty = built-in)");
             ui.add(egui::TextEdit::singleline(&mut draft.alert.sound_file).desired_width(320.0));
@@ -364,6 +371,10 @@ impl Dashboard {
         });
 
         section(ui, "System");
+        ui.horizontal(|ui| {
+            ui.label("Wait after sign-in before starting (s)");
+            ui.add(egui::DragValue::new(&mut draft.startup_delay_secs).range(0..=3600));
+        });
         if crate::service::installed() {
             ui.label("Started at sign-in by the PingLive Windows service. Uninstall it from Settings > Apps > Installed apps.");
         } else if ui

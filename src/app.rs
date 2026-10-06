@@ -37,7 +37,9 @@ pub struct PingLive {
     last_alert: Option<Instant>,
     was_down: bool,
 
-    muted: bool,
+    /// Started at sign-in: no alert sounds until the first reply, so a
+    /// network that is still coming up does not beep at the login screen.
+    quiet_start: bool,
     visible: bool,
     interactive: bool,
     dirty_since: Option<Instant>,
@@ -48,10 +50,10 @@ pub struct PingLive {
 }
 
 impl PingLive {
-    pub fn new(cfg: Config, hotkeys: Option<Hotkeys>, hist: History) -> Self {
+    pub fn new(cfg: Config, hotkeys: Option<Hotkeys>, hist: History, autostart: bool) -> Self {
         let interactive = !cfg.window.click_through;
         // Built here, on the UI thread, because the tray needs its message loop.
-        let tray = Tray::new(cfg.window.visible, false);
+        let tray = Tray::new(cfg.window.visible, cfg.alert.muted, cfg.alert.volume);
         let rx = ping::spawn(cfg.target.clone(), cfg.interval_ms, cfg.timeout_ms);
         let beat = Arc::new(AtomicU64::new(cfg.interval_ms));
         crate::win::spawn_heartbeat(beat.clone());
@@ -72,7 +74,7 @@ impl PingLive {
             high_streak: 0,
             last_alert: None,
             was_down: false,
-            muted: false,
+            quiet_start: autostart,
             interactive,
             dirty_since: None,
             passthrough_applied: None,
@@ -94,8 +96,9 @@ impl PingLive {
                     self.streak = 0;
                     if self.was_down {
                         self.was_down = false;
-                        if self.cfg.alert.enabled && self.cfg.alert.recovery_sound && !self.muted {
-                            self.sound.recovered(&self.cfg.alert);
+                        let a = &self.cfg.alert;
+                        if a.enabled && a.recovery_sound && !a.muted && !self.quiet_start {
+                            self.sound.recovered(a);
                         }
                     }
                     if ms >= self.cfg.alert.high_ping_ms {
@@ -106,6 +109,7 @@ impl PingLive {
                     } else {
                         self.high_streak = 0;
                     }
+                    self.quiet_start = false;
                 }
                 Sample::Timeout | Sample::Unresolved => {
                     self.timeouts += 1;
@@ -122,7 +126,7 @@ impl PingLive {
 
     /// `timeout`: the request timed out; otherwise a ping spike.
     fn fire_alert(&mut self, timeout: bool) {
-        if !self.cfg.alert.enabled || self.muted {
+        if !self.cfg.alert.enabled || self.cfg.alert.muted || self.quiet_start {
             return;
         }
         let cooldown = Duration::from_secs(self.cfg.alert.cooldown_secs);
@@ -205,7 +209,7 @@ impl PingLive {
                     self.cfg.window.click_through = !self.interactive;
                     self.mark_dirty();
                 }
-                Some(Action::ToggleMute) => self.muted = !self.muted,
+                Some(Action::ToggleMute) => self.toggle_mute(),
                 Some(Action::ToggleGraph) => {
                     self.cfg.window.show_graph = !self.cfg.window.show_graph;
                     let h = if self.cfg.window.show_graph {
@@ -244,13 +248,25 @@ impl PingLive {
                 TrayCmd::ToggleOverlay => self.set_visible(!self.visible),
                 TrayCmd::Dashboard => self.dash.show_tab(Tab::Overview),
                 TrayCmd::Settings => self.dash.show_tab(Tab::Settings),
-                TrayCmd::ToggleMute => self.muted = !self.muted,
+                TrayCmd::ToggleMute => self.toggle_mute(),
+                TrayCmd::Volume(pct) => {
+                    self.cfg.alert.volume = pct as f32 / 100.0;
+                    self.mark_dirty();
+                    self.sound.spike(&self.cfg.alert); // let them hear the new level
+                }
+                TrayCmd::TestSound => self.sound.alarm(&self.cfg.alert),
                 TrayCmd::Exit => self.quit(ctx),
             }
         }
         if let Some(tray) = self.tray.as_ref() {
-            tray.sync_checks(self.visible, self.muted);
+            tray.sync_checks(self.visible, self.cfg.alert.muted, self.cfg.alert.volume);
         }
+    }
+
+    /// Mute lives in the config so it survives a restart.
+    fn toggle_mute(&mut self) {
+        self.cfg.alert.muted = !self.cfg.alert.muted;
+        self.mark_dirty();
     }
 
     fn toggle_dashboard(&mut self) {
@@ -290,7 +306,7 @@ impl PingLive {
             "{}  {now}  TO {}{}",
             self.cfg.display_name(),
             self.timeouts,
-            if self.muted { "  muted" } else { "" }
+            if self.cfg.alert.muted { "  muted" } else { "" }
         )
     }
 
@@ -320,6 +336,7 @@ impl PingLive {
         new.window.y = self.cfg.window.y;
         new.window.click_through = self.cfg.window.click_through;
         new.window.visible = self.cfg.window.visible;
+        new.alert.muted = self.cfg.alert.muted;
 
         let old = std::mem::replace(&mut self.cfg, new);
         let cfg = &self.cfg;
@@ -526,6 +543,10 @@ impl eframe::App for PingLive {
             // The PingLive service is stopping or being uninstalled.
             self.quit(ctx);
         }
+        // Not before the window has settled: see the size nudge above.
+        if self.fix_stage == 3 && crate::win::dashboard_requested() {
+            self.dash.show_tab(Tab::Overview);
+        }
         self.drain_samples();
         self.handle_hotkeys(ctx);
         self.handle_tray(ctx);
@@ -624,7 +645,7 @@ impl eframe::App for PingLive {
                     "TO {}  loss {:.0}%{}",
                     self.timeouts,
                     stats.loss_pct,
-                    if self.muted { "  (muted)" } else { "" }
+                    if self.cfg.alert.muted { "  (muted)" } else { "" }
                 ),
                 FontId::proportional(10.5),
                 to_col,

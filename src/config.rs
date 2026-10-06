@@ -16,6 +16,8 @@ pub struct Config {
     pub history: usize,
     /// Days of raw ping history kept on disk; 0 = keep forever.
     pub retention_days: u32,
+    /// Seconds to wait before starting when launched at sign-in (`--autostart`).
+    pub startup_delay_secs: u64,
 
     pub window: WindowCfg,
     pub alert: AlertCfg,
@@ -45,6 +47,8 @@ pub struct WindowCfg {
 #[serde(default)]
 pub struct AlertCfg {
     pub enabled: bool,
+    /// Silenced from the tray or Ctrl+Alt+M; remembered across restarts.
+    pub muted: bool,
     /// Consecutive timeouts needed before the alert fires.
     pub timeout_streak: u32,
     /// Minimum seconds between two alerts, so a dead link does not machine-gun.
@@ -84,6 +88,7 @@ impl Default for Config {
             timeout_ms: 1000,
             history: 120,
             retention_days: 365,
+            startup_delay_secs: 60,
             window: WindowCfg::default(),
             alert: AlertCfg::default(),
             colors: ColorCfg::default(),
@@ -111,6 +116,7 @@ impl Default for AlertCfg {
     fn default() -> Self {
         Self {
             enabled: true,
+            muted: false,
             timeout_streak: 1,
             cooldown_secs: 3,
             recovery_sound: false,
@@ -173,6 +179,7 @@ impl Config {
         self.interval_ms = self.interval_ms.clamp(100, 60_000);
         self.timeout_ms = self.timeout_ms.clamp(100, 10_000);
         self.history = self.history.clamp(20, 2000);
+        self.startup_delay_secs = self.startup_delay_secs.min(3600);
         self.window.opacity = self.window.opacity.clamp(0.0, 1.0);
         self.window.width = self.window.width.clamp(140.0, 1200.0);
         self.window.height = self.window.height.clamp(48.0, 800.0);
@@ -182,6 +189,7 @@ impl Config {
         self.alert.beep_ms = self.alert.beep_ms.clamp(20, 2000);
         self.alert.beep_freq_hz = self.alert.beep_freq_hz.clamp(37, 32767);
         self.alert.high_ping_ms = self.alert.high_ping_ms.max(1);
+        self.alert.volume = self.alert.volume.clamp(0.0, 1.0);
         self.target = self.target.trim().to_owned();
         if self.target.trim().is_empty() {
             self.target = "8.8.8.8".into();
@@ -191,5 +199,27 @@ impl Config {
 
     pub fn display_name(&self) -> &str {
         if self.label.trim().is_empty() { &self.target } else { &self.label }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mute_survives_a_save_and_load() {
+        let mut cfg = Config::default();
+        assert!(!cfg.alert.muted);
+        cfg.alert.muted = true;
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(back.alert.muted);
+    }
+
+    #[test]
+    fn config_from_an_older_version_still_loads() {
+        let cfg: Config = toml::from_str("target = \"1.1.1.1\"\n[alert]\nvolume = 0.5\n").unwrap();
+        assert!(!cfg.alert.muted);
+        assert_eq!(cfg.startup_delay_secs, 60);
     }
 }

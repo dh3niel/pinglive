@@ -14,6 +14,10 @@ mod win;
 
 /// Exact title of the overlay window; `win::make_popup` finds it by this.
 pub const OVERLAY_TITLE: &str = "PingLive";
+/// Passed by whatever starts us at sign-in (the service, the `Run` entry, the
+/// scheduled task): wait `startup_delay_secs` first, then stay quiet until
+/// the first reply.
+pub const AUTOSTART_ARG: &str = "--autostart";
 
 use egui::ViewportBuilder;
 
@@ -27,6 +31,17 @@ fn main() -> eframe::Result<()> {
         Some("--uninstall") => return Ok(service::uninstall()),
         _ => {}
     }
+    let autostart = std::env::args().any(|a| a == AUTOSTART_ARG);
+    let mut cfg = Config::load();
+    if autostart {
+        wait_for_startup(cfg.startup_delay_secs);
+    }
+    // The desktop shortcut passes this: open the dashboard of whichever copy
+    // owns the session - the one already running, or this one.
+    let dashboard = std::env::args().any(|a| a == "--dashboard");
+    if dashboard {
+        win::request_dashboard();
+    }
     if already_running() {
         // Started twice (e.g. logon task plus a manual launch) - the first
         // instance keeps the screen to itself.
@@ -38,7 +53,6 @@ fn main() -> eframe::Result<()> {
         win::set_autostart(false);
     }
 
-    let mut cfg = Config::load();
     apply_cli_overrides(&mut cfg);
     cfg.save();
 
@@ -75,11 +89,25 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "PingLive",
         options,
-        Box::new(move |_cc| Ok(Box::new(PingLive::new(cfg, hk, hist)))),
+        Box::new(move |_cc| Ok(Box::new(PingLive::new(cfg, hk, hist, autostart)))),
     )
 }
 
+/// Sign-in is busy and the network is often not up yet, so an autostarted
+/// overlay holds off. Sleeps in short steps so a stopping service is noticed.
+fn wait_for_startup(secs: u64) {
+    use std::time::{Duration, Instant};
+    let until = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < until {
+        if service::stop_requested() {
+            std::process::exit(0);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 /// `--target <host>`, `--interval <ms>`, `--timeout <ms>`, `--show`
+/// (`--autostart` and `--dashboard` are handled in `main`)
 /// override the config file for this run and are written back to it.
 fn apply_cli_overrides(cfg: &mut Config) {
     let mut args = std::env::args().skip(1);
