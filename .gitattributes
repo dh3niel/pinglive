@@ -1,0 +1,3 @@
+# bash needs LF and cmd.exe needs CRLF, whatever core.autocrlf says.
+*.sh text eol=lf
+*.cmd text eol=crlf

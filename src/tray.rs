@@ -5,7 +5,9 @@
 //! Events are polled from the tray's channels on each UI frame; no callbacks
 //! that wake the UI from outside (see ping.rs for why).
 
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{
+    CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
+};
 use tray_icon::{Icon, MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,8 +17,14 @@ pub enum TrayCmd {
     Dashboard,
     Settings,
     ToggleMute,
+    /// Alert volume in percent.
+    Volume(u8),
+    TestSound,
     Exit,
 }
+
+/// Levels offered in the tray's Volume submenu, in percent.
+const VOLUME_STEPS: [u8; 5] = [100, 75, 50, 25, 10];
 
 /// Colour of the tray dot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,17 +40,27 @@ pub struct Tray {
     icon: TrayIcon,
     overlay: CheckMenuItem,
     mute: CheckMenuItem,
+    volumes: Vec<(u8, CheckMenuItem)>,
     ids: Vec<(MenuId, TrayCmd)>,
     level: Level,
     tooltip: String,
 }
 
 impl Tray {
-    pub fn new(overlay_visible: bool, muted: bool) -> Option<Self> {
+    pub fn new(overlay_visible: bool, muted: bool, volume: f32) -> Option<Self> {
         let overlay = CheckMenuItem::new("Show overlay", true, overlay_visible, None);
         let dashboard = MenuItem::new("Dashboard", true, None);
         let settings = MenuItem::new("Settings", true, None);
         let mute = CheckMenuItem::new("Mute alerts", true, muted, None);
+        let volumes: Vec<(u8, CheckMenuItem)> = VOLUME_STEPS
+            .iter()
+            .map(|&p| (p, CheckMenuItem::new(format!("{p}%"), true, p == percent(volume), None)))
+            .collect();
+        let volume_menu = Submenu::new("Volume", true);
+        for (_, item) in &volumes {
+            volume_menu.append(item).ok()?;
+        }
+        let test = MenuItem::new("Test sound", true, None);
         let exit = MenuItem::new("Exit PingLive", true, None);
 
         let menu = Menu::new();
@@ -52,18 +70,22 @@ impl Tray {
             &PredefinedMenuItem::separator(),
             &settings,
             &mute,
+            &volume_menu,
+            &test,
             &PredefinedMenuItem::separator(),
             &exit,
         ])
         .ok()?;
 
-        let ids = vec![
+        let mut ids = vec![
             (overlay.id().clone(), TrayCmd::ToggleOverlay),
             (dashboard.id().clone(), TrayCmd::Dashboard),
             (settings.id().clone(), TrayCmd::Settings),
             (mute.id().clone(), TrayCmd::ToggleMute),
+            (test.id().clone(), TrayCmd::TestSound),
             (exit.id().clone(), TrayCmd::Exit),
         ];
+        ids.extend(volumes.iter().map(|(p, item)| (item.id().clone(), TrayCmd::Volume(*p))));
 
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
@@ -78,6 +100,7 @@ impl Tray {
             icon,
             overlay,
             mute,
+            volumes,
             ids,
             level: Level::Idle,
             tooltip: String::new(),
@@ -104,9 +127,12 @@ impl Tray {
 
     /// Keeps the check marks in line with state changed from elsewhere
     /// (hotkeys, the dashboard). Clicking a check item flips it on its own.
-    pub fn sync_checks(&self, overlay_visible: bool, muted: bool) {
+    pub fn sync_checks(&self, overlay_visible: bool, muted: bool, volume: f32) {
         self.overlay.set_checked(overlay_visible);
         self.mute.set_checked(muted);
+        for (p, item) in &self.volumes {
+            item.set_checked(*p == percent(volume));
+        }
     }
 
     /// Only touches the shell when something actually changed.
@@ -120,6 +146,10 @@ impl Tray {
             self.tooltip = tooltip;
         }
     }
+}
+
+fn percent(volume: f32) -> u8 {
+    (volume.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
 /// A 32x32 anti-aliased dot with a dark rim, coloured by level.

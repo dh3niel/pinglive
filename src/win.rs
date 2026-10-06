@@ -13,7 +13,7 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Foundation::{HANDLE, HWND, LPARAM, WAIT_OBJECT_0};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId,
@@ -159,7 +159,7 @@ pub fn set_autostart(on: bool) -> bool {
     unsafe {
         if on {
             let Ok(exe) = std::env::current_exe() else { return false };
-            let cmd = wide(&format!("\"{}\"", exe.display()));
+            let cmd = wide(&format!("\"{}\" {}", exe.display(), crate::AUTOSTART_ARG));
             RegSetKeyValueW(
                 HKEY_CURRENT_USER,
                 key.as_ptr(),
@@ -173,6 +173,38 @@ pub fn set_autostart(on: bool) -> bool {
             r == 0 || r == 2 // ERROR_FILE_NOT_FOUND: already off
         }
     }
+}
+
+// ---- Open the dashboard from a second launch ---------------------------------
+
+const DASHBOARD_EVENT: &str = r"Local\PingLiveShowDashboard";
+
+/// Auto-reset event shared by every copy in this session. The handle is
+/// leaked on purpose, like the single-instance mutex.
+fn dashboard_event() -> HANDLE {
+    use windows_sys::Win32::System::Threading::CreateEventW;
+    static EVENT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *EVENT.get_or_init(|| {
+        let name = wide(DASHBOARD_EVENT);
+        unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) as usize }
+    }) as HANDLE
+}
+
+/// `pinglive.exe --dashboard`: asks the overlay running in this session
+/// (possibly ourselves, once the window is up) to open its dashboard.
+pub fn request_dashboard() {
+    use windows_sys::Win32::System::Threading::SetEvent;
+    let event = dashboard_event();
+    if !event.is_null() {
+        unsafe { SetEvent(event) };
+    }
+}
+
+/// Polled from the overlay's frame loop.
+pub fn dashboard_requested() -> bool {
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+    let event = dashboard_event();
+    !event.is_null() && unsafe { WaitForSingleObject(event, 0) } == WAIT_OBJECT_0
 }
 
 /// Opens a folder in Explorer.

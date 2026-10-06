@@ -79,7 +79,8 @@ single ~4 MB exe with negligible CPU/GPU cost.
   history, *Start with Windows*.
 - **Tray icon** — a dot coloured by the live ping, with the reading in its
   tooltip. Double-click brings a hidden overlay back; right-click for
-  Dashboard / Show overlay / Settings / Mute / Exit.
+  Dashboard / Show overlay / Settings / Mute / Volume / Test sound / Exit.
+  Mute and volume are remembered across restarts.
 
 ## Build from source
 
@@ -139,6 +140,7 @@ interval_ms = 1000      # how often to ping
 timeout_ms = 1000       # no reply within this = timeout
 history = 120           # samples kept in the graph
 retention_days = 365    # days of raw history kept on disk, 0 = forever
+startup_delay_secs = 60 # wait this long after sign-in before starting, 0 = at once
 
 [window]
 x = 40.0
@@ -153,6 +155,7 @@ visible = true          # false = hidden to the tray (remembered across restarts
 
 [alert]
 enabled = true
+muted = false           # the tray's Mute / Ctrl+Alt+M, remembered across restarts
 timeout_streak = 1      # consecutive timeouts before the sound fires
 cooldown_secs = 3       # minimum gap between alerts
 recovery_sound = false    # no chime on recovery; beep only for the two cases below
@@ -219,7 +222,13 @@ Changing the target keeps writing to the same files, so the history is
 target\release\pinglive.exe --install
 ```
 
-This asks for administrator rights once, then:
+From a checkout, `build-release.cmd` (double-click, or from a terminal) and
+`build-release.sh` (Git Bash) do the whole thing: `cargo build --release`,
+`--install`, and a **PingLive** shortcut on the desktop. The shortcut runs
+`pinglive.exe --dashboard`, which opens the dashboard of the overlay that is
+already running, or starts it if you had quit it.
+
+`--install` asks for administrator rights once, then:
 
 - copies the exe to `C:\Program Files\PingLive\pinglive.exe`;
 - registers an auto-start **PingLive** service ("PingLive Ping Overlay" in
@@ -236,6 +245,14 @@ crashes (up to 5 times in 10 minutes). If you quit the overlay yourself
 (`Ctrl+Alt+Q` or the tray) it stays closed until the next sign-in — start it
 from the exe again or restart the service. Stopping the service closes the
 overlay cleanly, with its history flushed.
+
+When it is started at sign-in (by the service, the *Start with Windows* entry
+or the scheduled task below, all of which pass `--autostart`) the overlay
+waits `startup_delay_secs` (60 by default, **Settings → System**) before it
+appears, and plays no alert until the first reply has come back, so a network
+that is still coming up does not beep at you. Starting the exe yourself, and
+restarts after a crash, are immediate. A *Start with Windows* entry made by an
+older version has no `--autostart`: untick and tick it again.
 
 Running `--install` again with a newer build upgrades in place. To remove it,
 use **Uninstall** in Installed apps, or:

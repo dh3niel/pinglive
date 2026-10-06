@@ -48,6 +48,9 @@ const EXE_NAME: &str = "pinglive.exe";
 const MAX_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(600);
 const STILL_ACTIVE: u32 = 259;
+/// A session already signed in when the service starts this soon after boot
+/// is treated as a fresh sign-in (see `service_main`).
+const BOOT_WINDOW: Duration = Duration::from_secs(180);
 /// Exit code of an overlay that found another copy already running in its
 /// session (see `main::already_running`). Unlike 0 it is not a user quit, so
 /// the service keeps trying (within the restart budget) until it owns the
@@ -75,6 +78,9 @@ struct Session {
     process: HANDLE,
     /// The user quit the overlay themselves; leave it closed until next logon.
     quit: bool,
+    /// Not launched since its sign-in yet: the first launch gets
+    /// `--autostart` (startup delay), crash restarts do not.
+    fresh: bool,
     launches: Vec<Instant>,
 }
 
@@ -126,9 +132,12 @@ fn service_main(_args: Vec<OsString>) {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from(EXE_NAME));
     let mut sessions: HashMap<u32, Session> = HashMap::new();
 
-    // Service (re)started while people are already signed in.
+    // Service (re)started while people are already signed in. Right after
+    // boot that is an auto-logon that beat us to it, so it still counts as a
+    // sign-in; later on it is an upgrade or a service restart.
+    let booting = uptime() < BOOT_WINDOW;
     for id in existing_sessions() {
-        sessions.insert(id, Session::new());
+        sessions.insert(id, Session::new(booting));
     }
 
     loop {
@@ -143,13 +152,13 @@ fn service_main(_args: Vec<OsString>) {
                     s.launches.clear();
                 }
                 _ => {
-                    if let Some(old) = sessions.insert(id, Session::new()) {
+                    if let Some(old) = sessions.insert(id, Session::new(true)) {
                         old.close();
                     }
                 }
             },
             Ok(Msg::Connect(id)) => {
-                sessions.entry(id).or_insert_with(Session::new);
+                sessions.entry(id).or_insert_with(|| Session::new(true));
             }
             Ok(Msg::Logoff(id)) => {
                 if let Some(old) = sessions.remove(&id) {
@@ -166,8 +175,8 @@ fn service_main(_args: Vec<OsString>) {
 }
 
 impl Session {
-    fn new() -> Self {
-        Session { process: null_mut(), quit: false, launches: Vec::new() }
+    fn new(fresh: bool) -> Self {
+        Session { process: null_mut(), quit: false, fresh, launches: Vec::new() }
     }
 
     fn alive(&self) -> bool {
@@ -210,8 +219,9 @@ fn supervise(sessions: &mut HashMap<u32, Session>, exe: &Path) {
         if s.launches.len() >= MAX_RESTARTS {
             continue;
         }
-        match launch_in_session(id, exe) {
+        match launch_in_session(id, exe, s.fresh) {
             Launch::Started(p) => {
+                s.fresh = false;
                 s.process = p;
                 s.launches.push(Instant::now());
             }
@@ -230,7 +240,7 @@ enum Launch {
 }
 
 /// Runs the overlay as the user signed in to `session`, on their desktop.
-fn launch_in_session(session: u32, exe: &Path) -> Launch {
+fn launch_in_session(session: u32, exe: &Path, autostart: bool) -> Launch {
     use windows_sys::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
     use windows_sys::Win32::System::RemoteDesktop::WTSQueryUserToken;
     use windows_sys::Win32::System::Threading::{
@@ -238,7 +248,8 @@ fn launch_in_session(session: u32, exe: &Path) -> Launch {
     };
 
     let app = wide(&exe.display().to_string());
-    let mut cmdline = wide(&format!("\"{}\"", exe.display()));
+    let arg = if autostart { crate::AUTOSTART_ARG } else { "" };
+    let mut cmdline = wide(format!("\"{}\" {arg}", exe.display()).trim_end());
     let dir = exe.parent().map(|d| wide(&d.display().to_string()));
     let mut desktop = wide(r"winsta0\default");
     unsafe {
@@ -276,6 +287,11 @@ fn launch_in_session(session: u32, exe: &Path) -> Launch {
         CloseHandle(pi.hThread);
         Launch::Started(pi.hProcess)
     }
+}
+
+fn uptime() -> Duration {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+    Duration::from_millis(unsafe { GetTickCount64() })
 }
 
 /// Every session with a user in it, connected or not (session 0 is services).

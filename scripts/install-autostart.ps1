@@ -28,11 +28,9 @@ if (-not (Test-Path -LiteralPath $ExePath)) {
     throw "Executable not found: $ExePath. Build it first with: cargo build --release"
 }
 
-$action = if ($Arguments) {
-    New-ScheduledTaskAction -Execute $ExePath -Argument $Arguments -WorkingDirectory (Split-Path $ExePath)
-} else {
-    New-ScheduledTaskAction -Execute $ExePath -WorkingDirectory (Split-Path $ExePath)
-}
+# --autostart: wait out startup_delay_secs, then stay quiet until the first reply.
+$Arguments = "--autostart $Arguments".Trim()
+$action = New-ScheduledTaskAction -Execute $ExePath -Argument $Arguments -WorkingDirectory (Split-Path $ExePath)
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
@@ -51,6 +49,6 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Settings $settings -Principal $principal -Force | Out-Null
 
 Write-Host "Registered scheduled task '$TaskName' -> $ExePath"
-Write-Host "Starting it now..."
+Write-Host "Starting it now (it appears after the startup delay, 60 s by default)..."
 Start-ScheduledTask -TaskName $TaskName
 Write-Host "Done. Remove it again with scripts\uninstall-autostart.ps1"
